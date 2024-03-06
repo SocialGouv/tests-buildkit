@@ -2,7 +2,7 @@ jobs:
   ~chart: jobs
   runs:
     build-frontend:
-      use: build
+      use: &build SocialGouv/tests-buildkit/.kontinuous/jobs/build
       with:
         imagePackage: frontend
         dockerfile: targets/frontend/Dockerfile
@@ -11,22 +11,22 @@ jobs:
             secretName: npm-tiptap
             secretKey: NPM_TIPTAP_TOKEN
     build-ingester:
-      use: build
+      use: *build
       with:
         imagePackage: ingester
         dockerfile: targets/ingester/Dockerfile
     build-alert:
-      use: build
+      use: *build
       with:
         imagePackage: alert
         dockerfile: targets/alert-cli/Dockerfile
     build-export:
-      use: build
+      use: *build
       with:
         imagePackage: export
         dockerfile: targets/export-elasticsearch/Dockerfile
     build-contributions:
-      use: build
+      use: *build
       with:
         imagePackage: contributions
         dockerfile: targets/contributions/Dockerfile
@@ -34,7 +34,7 @@ jobs:
           NODE_ENV: production
           CDTN_API_URL: https://cdtn-api.fabrique.social.gouv.fr
     build-hasura:
-      use: build
+      use: *build
       with:
         imagePackage: hasura
         context: targets/hasura
