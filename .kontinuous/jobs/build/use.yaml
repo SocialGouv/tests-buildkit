@@ -59,7 +59,7 @@ runs:
         "
       {{ end }}
 
-      buildkit_addr={{ or $.with.buildkitServiceAddr "tcp://buildkit-service.buildkit-service.svc.cluster.local:1234" }}
+      buildkit_addr={{ or $.with.buildkitServiceAddr "tcp://buildkit-service.buildkit-service.svc:1234" }}
 
       # consistent hashing distribution
       {{ $buildkitPodCount := (or $.with.buildkitPodCount $.Values.global.buildkitPodCount) }}
