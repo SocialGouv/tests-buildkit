@@ -3,3 +3,5 @@ dependencies:
   fabrique:
     extends:
       - name: ovh
+links:
+  socialgouv/tests-buildkit: /lab/fabrique/sre/tests-buildkit # local dev

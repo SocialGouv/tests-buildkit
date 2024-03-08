@@ -3,7 +3,10 @@ runs:
   - name: buildkit
     checkout: true
     action: false
+    retry: 0
     image: moby/buildkit:v0.13.0-rootless
+    # image: ghcr.io/socialgouv/buildkit:v0.13.0-rootless
+    # kubernetes: true
     cpuLimit: "2"
     cpuRequest: 500m
     memoryLimit: 4Gi
@@ -36,16 +39,52 @@ runs:
         name: certs
         readOnly: true
     run: |
-      if [ "{{ $.with.registry }}" != "" ]; then
-        export CI_REGISTRY="{{ $.with.registry }}"
-      fi
-      buildctl_options_cache=""
-      buildctl_options_mtls=""
+      {{ if $.with.registry }}
+      export CI_REGISTRY="{{ $.with.registry }}"
+      {{ end }}
+      export IMAGE_NAME={{ if (or $.with.imageProject $.Values.global.imageProject) }}{{ (print "/" (or $.with.imageProject $.Values.global.imageProject)) }}{{ end }}/{{ or $.with.imageRepository $.Values.global.imageRepository }}{{ if $.with.imagePackage }}{{ (print "/" $.with.imagePackage) }}{{else}}/app{{ end }}{{ if $.with.target }}{{ (print "-" $.with.target) }}{{ end }}
+      export IMAGE_PATH="${CI_REGISTRY}${IMAGE_NAME}"
+
+      buildctl_options_cache="\
+        --import-cache type=registry,ref=$IMAGE_PATH:cache-main \
+        --import-cache type=registry,ref=$IMAGE_PATH:cache-master \
+        --import-cache type=registry,ref=$IMAGE_PATH:cache-dev \
+        --import-cache type=registry,ref=$IMAGE_PATH:cache-develop \
+        --import-cache type=registry,ref=$IMAGE_PATH:{{ $.Values.global.branchSlug32 }} \
+        "
+      {{ if has $.Values.global.branchSlug (list "main" "master" "dev" "develop")  }}
+      buildctl_options_cache="\
+        $buildctl_options_cache \
+        --export-cache type=registry,mode=max,image-manifest=true,ignore-error=true,ref=$IMAGE_PATH:cache-{{ $.Values.global.branchSlug }} \
+        "
+      {{ end }}
+
+      buildkit_addr={{ or $.with.buildkitServiceAddr "tcp://buildkit-service.buildkit-service.svc.cluster.local:1234" }}
+
+      # consistent hashing distribution
+      {{ $buildkitPodCount := (or $.with.buildkitPodCount $.Values.global.buildkitPodCount) }}
+      {{ if $buildkitPodCount }}
+      ## setup consistent hashing variable
+      export pod_count={{ $buildkitPodCount }}
+      export pod_hash_ref="$IMAGE_NAME"
+
+      ## get the pod number
+      pod_num=$(( 0x$(echo "$pod_hash_ref" | md5sum | cut -d ' ' -f 1 | head -c 15) ))
+      [ $pod_num -lt 0 ] && pod_num=$((pod_num * -1))
+      pod_num=$(( $pod_num % $pod_count ))
+
+      ## rewrite addr
+      prefix_addr="${buildkit_addr%%.*}"
+      protocol="${prefix_addr%%//*}"
+      # protocol=kube-pod
+      subdomain="${prefix_addr#*//}"
+
+      buildkit_addr=$(echo "$buildkit_addr" | sed "s|$prefix_addr|$protocol://$subdomain-$pod_num.$subdomain|")
+      {{ end }}
 
       {{ if (or $.with.buildkitServiceEnabled $.Values.global.buildkitServiceEnabled) }}
-      buildctl_cmd="buildctl \
-        --addr {{ or $.with.buildkitServiceAddr "tcp://buildkit-service.buildkit-service.svc:1234" }} \
-      "
+      buildctl_cmd="buildctl --addr $buildkit_addr "
+      buildctl_options_mtls=""
       if [ -f /buildkit-certs/cert.pem ]; then
         buildctl_options_mtls="\
           --tlscacert /buildkit-certs/ca.pem \
@@ -55,15 +94,10 @@ runs:
       fi
       {{ else }}
       buildctl_cmd=buildctl-daemonless.sh
-      buildctl_options_cache="\
-        --export-cache type=inline \
-        --import-cache type=registry,ref=$IMAGE_PATH:{{ $.Values.global.branchSlug32 }} \
-        "
       {{ end }}
 
       mkdir -p /home/user/.docker
       echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /home/user/.docker/config.json
-      export IMAGE_PATH=$CI_REGISTRY{{ if (or $.with.imageProject $.Values.global.imageProject) }}{{ (print "/" (or $.with.imageProject $.Values.global.imageProject)) }}{{ end }}/{{ or $.with.imageRepository $.Values.global.imageRepository }}{{ if $.with.imagePackage }}{{ (print "/" $.with.imagePackage) }}{{else}}/app{{ end }}{{ if $.with.target }}{{ (print "-" $.with.target) }}{{ end }}
       export LATEST_TAG=""
       if [ "{{ $.Values.global.isProd }}" = "true" ]; then
         export LATEST_TAG=",$IMAGE_PATH:latest"
