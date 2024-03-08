@@ -75,7 +75,7 @@ runs:
 
       ## rewrite addr
       prefix_addr="${buildkit_addr%%.*}"
-      protocol="${prefix_addr%%//*}"
+      protocol="${prefix_addr%%://*}"
       # protocol=kube-pod
       subdomain="${prefix_addr#*//}"
 
