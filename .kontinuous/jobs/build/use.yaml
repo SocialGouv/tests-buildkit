@@ -52,6 +52,7 @@ runs:
         --import-cache type=registry,ref=$IMAGE_PATH:cache-develop \
         --import-cache type=registry,ref=$IMAGE_PATH:{{ $.Values.global.branchSlug32 }} \
         "
+
       {{ if has $.Values.global.branchSlug (list "main" "master" "dev" "develop")  }}
       buildctl_options_cache="\
         $buildctl_options_cache \
@@ -82,6 +83,8 @@ runs:
       buildkit_addr=$(echo "$buildkit_addr" | sed "s|$prefix_addr|$protocol://$subdomain-$pod_num.$subdomain|")
       {{ end }}
 
+      buildkit_addr="tcp://test-buildkit-service.test-buildkit-service.svc:1235" # debug fail
+
       {{ if (or $.with.buildkitServiceEnabled $.Values.global.buildkitServiceEnabled) }}
       buildctl_cmd="buildctl --addr $buildkit_addr "
       buildctl_options_mtls=""
@@ -102,6 +105,13 @@ runs:
       if [ "{{ $.Values.global.isProd }}" = "true" ]; then
         export LATEST_TAG=",$IMAGE_PATH:latest"
       fi
+
+      tempfile=/tmp/buildkit-job-output
+      pipe=/tmp/buildkit-pipe-output
+      mkfifo "$pipe"
+      tee "$tempfile" < "$pipe" &
+
+      set +e
       $buildctl_cmd \
         $buildctl_options_mtls \
         build \
@@ -124,5 +134,17 @@ runs:
         {{ if $.with.target -}}
         --target="{{ $.with.target }}" \
         {{ end -}}
+          >"$pipe" 2>&1
+
+      status=$?
+      set -e
+
+      if [ "$status" -ne 0 ]; then
+        echo "Command failed. Handling error..."
+        cat "$tempfile"
+        exit $status
+      else
+        echo "Command succeeded."
+      fi
 
       echo "$IMAGE_PATH:{{ or $.with.imageTag $.Values.global.imageTag }}" >$KONTINUOUS_OUTPUT/IMAGE
